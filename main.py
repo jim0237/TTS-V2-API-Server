@@ -89,7 +89,6 @@ def download_model_files() -> bool:
                     repo_id=MODEL_REPO,
                     filename=file_path,
                     local_dir=".",
-                    local_dir_use_symlinks=False
                 )
                 print(f"Successfully downloaded {file_path}")
             except Exception as e:
