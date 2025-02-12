@@ -1,7 +1,10 @@
+from typing import Dict, List
 from datetime import datetime
 from contextlib import asynccontextmanager
 import io
+import os
 from pathlib import Path
+
 import torch
 import soundfile as sf
 import uvicorn
@@ -9,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from huggingface_hub import hf_hub_download
 
 # OpenAI API compatibility types
 class AudioModel(str):
@@ -24,6 +28,22 @@ class AudioSpeechRequest(BaseModel):
     voice: str = Field(..., description="The voice to use")
     response_format: str = Field(default=AudioResponseFormat.wav)
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
+
+# Constants
+MODEL_REPO = "hexgrad/Kokoro-82M"
+REQUIRED_FILES = [
+    'config.json',
+    'kokoro-v1_0.pth',
+    'voices/af_bella.pt',
+    'voices/af_sarah.pt',
+    'voices/am_adam.pt',
+    'voices/am_michael.pt',
+    'voices/bf_emma.pt',
+    'voices/bf_isabella.pt',
+    'voices/bm_george.pt',
+    'voices/bm_lewis.pt',
+    'voices/af_nicole.pt'
+]
 
 # Voice mapping
 OPENAI_VOICE_MAP = {
@@ -52,11 +72,53 @@ VOICE_DESCRIPTIONS = {
 model = None
 pipeline = None
 
+def check_files() -> List[str]:
+    """Check if all required files are present."""
+    return [f for f in REQUIRED_FILES if not os.path.exists(f)]
+
+def download_model_files() -> bool:
+    """Download all necessary files from Hugging Face."""
+    print("Downloading model files from Hugging Face...")
+    try:
+        os.makedirs('voices', exist_ok=True)
+        
+        for file_path in REQUIRED_FILES:
+            print(f"Downloading {file_path}...")
+            try:
+                downloaded_path = hf_hub_download(
+                    repo_id=MODEL_REPO,
+                    filename=file_path,
+                    local_dir=".",
+                    local_dir_use_symlinks=False
+                )
+                print(f"Successfully downloaded {file_path}")
+            except Exception as e:
+                print(f"Error downloading {file_path}: {str(e)}")
+                return False
+        return True
+    except Exception as e:
+        print(f"Error downloading model files: {str(e)}")
+        return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize the model and pipeline on server startup."""
     global model, pipeline
     try:
+        # Check for missing files
+        missing_files = check_files()
+        if missing_files:
+            print(f"Missing files: {missing_files}")
+            print("Attempting to download missing files...")
+            success = download_model_files()
+            if not success:
+                raise Exception("Failed to download model files")
+            
+            # Check again after download
+            missing_files = check_files()
+            if missing_files:
+                raise Exception(f"Still missing files after download: {missing_files}")
+
         # Import here to ensure files are downloaded
         from kokoro import KModel, KPipeline
         
