@@ -5,6 +5,7 @@ istftnet.py
 plbert.py
 config.json
 kokoro-v0_19.pth
+kokoro-v1_0.pth
 
 # Downloaded voice files
 voices/

@@ -1,16 +1,6 @@
---extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.5.1
-torchaudio==2.5.1
-
 fastapi
 uvicorn
-transformers
-python-multipart
 numpy
-scipy
-munch
-phonemizer
-huggingface-hub
-soundfile
-openai>=1.0.0
-jinja2
+torch
+huggingface_hub
+kokoro>=0.7.14
