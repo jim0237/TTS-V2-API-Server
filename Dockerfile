@@ -24,19 +24,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set up application directory
 WORKDIR /app
 
+# Create and activate virtual environment
+RUN python -m venv /app/venv && \
+    . /app/venv/bin/activate && \
+    pip install --upgrade pip setuptools wheel
+
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt && \
+# Install Python dependencies in virtual environment with error checking
+RUN . /app/venv/bin/activate && \
+    pip install --no-cache-dir -r requirements.txt || { echo "Pip install failed"; exit 1; } && \
+    echo "Verifying installed packages:" && \
+    pip list | tee /tmp/pip-list.txt && \
+    if ! grep -q "torch" /tmp/pip-list.txt; then \
+        echo "torch package not found in installed packages!"; \
+        exit 1; \
+    fi && \
+    rm /tmp/pip-list.txt && \
     find /usr/local -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null || true
 
 # Copy application files
-COPY main-ui.py main.py ./
+COPY main-ui.py main.py entrypoint.sh ./
 COPY templates templates/
 
 # Set up directories and SSL cert in one layer
-RUN mkdir -p voices && \
+RUN chmod +x entrypoint.sh && \
+    mkdir -p voices && \
     openssl req -x509 -newkey rsa:4096 -nodes \
         -keyout /app/key.pem -out /app/cert.pem -days 365 \
         -subj '/CN=localhost'
@@ -55,5 +69,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
     CMD curl -k -f https://localhost:8000/ || exit 1
 
-# Set command
-CMD ["python", "main-ui.py"]
+# Set command to use entrypoint script
+CMD ["/bin/bash", "/app/entrypoint.sh"]
