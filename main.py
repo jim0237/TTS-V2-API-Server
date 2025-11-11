@@ -29,6 +29,11 @@ class AudioSpeechRequest(BaseModel):
     response_format: str = Field(default=AudioResponseFormat.wav)
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
 
+class TTSRequest(BaseModel):
+    text: str = Field(..., description="The text to generate audio for")
+    voice: str = Field(default='af_bella', description="The voice to use")
+    speed: float = Field(default=1.0, ge=0.25, le=4.0)
+
 # Constants
 MODEL_REPO = "hexgrad/Kokoro-82M"
 REQUIRED_FILES = [
@@ -154,33 +159,33 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.post("/tts")
-async def text_to_speech(text: str, voice: str = 'af_bella') -> StreamingResponse:
+async def text_to_speech(request: TTSRequest) -> StreamingResponse:
     """Generate speech from text."""
     if not model:
         raise HTTPException(status_code=500, detail="Model not initialized")
-    
-    if voice not in VOICE_DESCRIPTIONS:
+
+    if request.voice not in VOICE_DESCRIPTIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Voice '{voice}' not found. Available voices: {list(VOICE_DESCRIPTIONS.keys())}"
+            detail=f"Voice '{request.voice}' not found. Available voices: {list(VOICE_DESCRIPTIONS.keys())}"
         )
-    
+
     try:
-        print(f"Generating speech for text: {text} with voice: {voice}")
+        print(f"Generating speech for text: {request.text} with voice: {request.voice}")
         temp_file = Path("temp.wav")
-        
+
         # Generate audio using pipeline's generator pattern
-        for i, (gs, ps, audio) in enumerate(pipeline(text, voice=voice, speed=1)):
+        for i, (gs, ps, audio) in enumerate(pipeline(request.text, voice=request.voice, speed=request.speed)):
             print(f"Generated chunk {i}: {gs}")
             sf.write(temp_file, audio.detach().cpu().numpy(), 24000)
-        
+
         # Read and return audio
         with open(temp_file, 'rb') as f:
             audio_data = f.read()
         temp_file.unlink()
-        
+
         return StreamingResponse(io.BytesIO(audio_data), media_type="audio/wav")
-    
+
     except Exception as e:
         print(f"Error generating speech: {str(e)}")
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
