@@ -11,6 +11,12 @@ services:
       - tts_cache_caal:/app/cache
     environment:
       - TTS_USE_HTTPS=false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     deploy:
       resources:
         reservations:
