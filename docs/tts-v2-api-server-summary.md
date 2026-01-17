@@ -8,6 +8,56 @@ This is a Text-to-Speech API server using the Kokoro TTS model (hexgrad/Kokoro-8
 
 ---
 
+## Quick Reference: Deployment & Updates
+
+| Item | Value |
+|------|-------|
+| **Production Image** | `ghcr.io/jim0237/tts-v2-api-server:latest` |
+| **Server Location** | `~/ai-toolbox-container-deployment/stacks/tts-v2-service/` |
+| **Port** | 8055 (HTTP) |
+| **Protocol** | HTTP (`TTS_USE_HTTPS=false` for CAAL compatibility) |
+| **Health Check** | `curl http://10.30.11.45:8055/v1/models` |
+
+### How to Update Production
+
+1. Push changes to `main` branch on GitHub
+2. Wait for GitHub Actions to build new image (check Actions tab)
+3. On server, in Dockge: **Down** → **Up** on `tts-v2-service` stack
+
+Or via command line:
+```bash
+cd ~/ai-toolbox-container-deployment/stacks/tts-v2-service
+docker compose pull
+docker compose up -d
+```
+
+### Test Commands
+```bash
+# Voice discovery
+curl http://10.30.11.45:8055/v1/audio/voices
+
+# TTS generation
+curl -X POST http://10.30.11.45:8055/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"kokoro","input":"Hello world","voice":"am_puck"}' \
+  --output test.wav
+```
+
+### Production Compose File
+The compose file at `~/ai-toolbox-container-deployment/stacks/tts-v2-service/compose.yaml` must include:
+```yaml
+environment:
+  - TTS_USE_HTTPS=false
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+```
+
+---
+
 ## Key Files
 
 | File | Purpose |
@@ -74,8 +124,7 @@ OpenAI voice names (`alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`) are als
 ### Ports
 
 - Internal: `8000`
-- Production (HTTPS): typically `8055`
-- CAAL Test (HTTP): `8056`
+- Production (HTTP for CAAL): `8055`
 
 ---
 
@@ -179,15 +228,9 @@ services:
 
 ### Production TTS (port 8055)
 - **Location:** `~/ai-toolbox-container-deployment/stacks/tts-v2-service/`
-- **Image:** `ghcr.io/bmv234/tts-v2-api-server:latest` (original fork)
-- **Mode:** HTTPS
-- **Status:** Healthy, running for 6 months
-
-### CAAL Test TTS (port 8056)
-- **Location:** `~/ai-toolbox-container-deployment/stacks/tts-v2-caal-test/`
-- **Image:** Local build from `jim0237/TTS-V2-API-Server` feature branch
+- **Image:** `ghcr.io/jim0237/tts-v2-api-server:latest`
 - **Mode:** HTTP (`TTS_USE_HTTPS=false`)
-- **Status:** Healthy after healthcheck fix
+- **Status:** Healthy, running with CAAL compatibility features
 
 ---
 
@@ -196,18 +239,9 @@ services:
 The repo has `.github/workflows/docker-build.yml` that:
 1. Triggers on push to main
 2. Builds Docker image
-3. Pushes to GHCR
+3. Pushes to GHCR at `ghcr.io/jim0237/tts-v2-api-server`
 
-**Current issue:** The workflow may still be configured to push to `bmv234`'s GHCR, not `jim0237`'s. Need to verify and update if necessary.
-
----
-
-## Next Steps for Production Deployment
-
-1. **Verify GitHub Actions** - Check workflow pushes to `ghcr.io/jim0237/tts-v2-api-server`
-2. **Trigger build** - Push to main to trigger image build
-3. **Update production compose** - Change image from `bmv234` to `jim0237`
-4. **Down + Up** in Dockge to pull new image
+The workflow uses `${{ github.repository }}` for the image name, so it automatically publishes to the correct GHCR namespace for the fork.
 
 ---
 
