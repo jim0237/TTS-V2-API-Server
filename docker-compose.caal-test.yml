@@ -1,0 +1,30 @@
+services:
+  tts-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8056:8000"
+    volumes:
+      - tts_models_caal:/app/models
+      - tts_cache_caal:/app/cache
+    environment:
+      - TTS_USE_HTTPS=false
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    labels:
+      - "dockge.description=TTS V2 API Server - CAAL Test"
+      - "dockge.icon=mic"
+      - "dockge.note=CAAL compatibility test (HTTP mode)"
+
+volumes:
+  tts_models_caal:
+    name: tts-models-caal
+  tts_cache_caal:
+    name: tts-cache-caal

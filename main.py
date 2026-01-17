@@ -43,6 +43,7 @@ REQUIRED_FILES = [
     'voices/af_sarah.pt',
     'voices/am_adam.pt',
     'voices/am_michael.pt',
+    'voices/am_puck.pt',
     'voices/bf_emma.pt',
     'voices/bf_isabella.pt',
     'voices/bm_george.pt',
@@ -64,13 +65,14 @@ OPENAI_VOICE_MAP = {
 VOICE_DESCRIPTIONS = {
     'af_bella': 'American Female - Bella',
     'af_sarah': 'American Female - Sarah',
+    'af_nicole': 'American Female - Nicole (ASMR voice)',
     'am_adam': 'American Male - Adam',
     'am_michael': 'American Male - Michael',
+    'am_puck': 'American Male - Puck',
     'bf_emma': 'British Female - Emma',
     'bf_isabella': 'British Female - Isabella',
     'bm_george': 'British Male - George',
-    'bm_lewis': 'British Male - Lewis',
-    'af_nicole': 'American Female - Nicole (ASMR voice)'
+    'bm_lewis': 'British Male - Lewis'
 }
 
 # Global state
@@ -196,12 +198,16 @@ async def create_speech(request: AudioSpeechRequest):
     if not model:
         raise HTTPException(status_code=500, detail="Model not initialized")
     
-    # Map OpenAI voice to internal voice
-    internal_voice = OPENAI_VOICE_MAP.get(request.voice)
-    if not internal_voice:
+    # Resolve voice: accept direct Kokoro voice IDs or map from OpenAI names
+    if request.voice in VOICE_DESCRIPTIONS:
+        internal_voice = request.voice
+    elif request.voice in OPENAI_VOICE_MAP:
+        internal_voice = OPENAI_VOICE_MAP[request.voice]
+    else:
+        available = list(VOICE_DESCRIPTIONS.keys()) + list(OPENAI_VOICE_MAP.keys())
         raise HTTPException(
             status_code=400,
-            detail=f"Voice '{request.voice}' not found. Available voices: {list(OPENAI_VOICE_MAP.keys())}"
+            detail=f"Voice '{request.voice}' not found. Available voices: {available}"
         )
     
     try:
@@ -236,6 +242,28 @@ async def create_speech(request: AudioSpeechRequest):
         print(f"Error generating speech: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Speech generation failed: {str(e)}")
 
+@app.get("/v1/audio/voices")
+async def list_voices():
+    """List available voices for TTS."""
+    voices = []
+    for voice_id, description in VOICE_DESCRIPTIONS.items():
+        # Parse language from voice ID prefix (af/am = American, bf/bm = British)
+        prefix = voice_id[:2]
+        if prefix in ('af', 'am'):
+            language = 'en-US'
+        elif prefix in ('bf', 'bm'):
+            language = 'en-GB'
+        else:
+            language = 'en'
+
+        voices.append({
+            "id": voice_id,
+            "name": description,
+            "language": language
+        })
+
+    return {"voices": voices}
+
 @app.get("/v1/models")
 async def list_models():
     """OpenAI-compatible endpoint to list available models."""
@@ -264,12 +292,23 @@ async def list_models():
     }
 
 if __name__ == "__main__":
-    config = uvicorn.Config(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        ssl_keyfile="key.pem",
-        ssl_certfile="cert.pem"
-    )
+    use_https = os.environ.get("TTS_USE_HTTPS", "true").lower() == "true"
+
+    if use_https:
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            ssl_keyfile="key.pem",
+            ssl_certfile="cert.pem"
+        )
+    else:
+        print("Running in HTTP mode (TTS_USE_HTTPS=false)")
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=8000
+        )
+
     server = uvicorn.Server(config)
     server.run()
