@@ -179,11 +179,33 @@ curl http://localhost:8000/v1/audio/voices
 
 ---
 
-## Files to Modify
+## Files Modified
 
 | File | Changes |
 |------|---------|
 | `main.py` | HTTP support, voice `am_puck`, accept direct voice IDs, voice discovery endpoint |
+| `main-ui.py` | Same changes as main.py (Docker entrypoint runs this file) |
+| `requirements.txt` | Pinned `kokoro==0.7.15` for model compatibility |
+| `docker-compose.caal-test.yml` | New compose file for CAAL testing with HTTP healthcheck |
+
+---
+
+## Docker Healthcheck Fix
+
+The Dockerfile contains an HTTPS healthcheck that causes "Invalid HTTP request received" warnings when running in HTTP mode. The `docker-compose.caal-test.yml` overrides this with an HTTP healthcheck:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+```
+
+**Important:** When using HTTP mode, you must either:
+1. Use `docker-compose.caal-test.yml` which includes the healthcheck override
+2. Or add a similar healthcheck override to your own compose file
 
 ---
 
