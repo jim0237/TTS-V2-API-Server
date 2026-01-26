@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Iterable
 from datetime import datetime
 from contextlib import asynccontextmanager
 import io
@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 import soundfile as sf
+import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -20,13 +21,14 @@ class AudioModel(str):
     tts_1_hd = "tts-1-hd"
 
 class AudioResponseFormat(str):
-    wav = "wav"  # We only support WAV for now
+    wav = "wav"
+    pcm = "pcm"
 
 class AudioSpeechRequest(BaseModel):
     model: str = Field(default=AudioModel.tts_1)
     input: str = Field(..., description="The text to generate audio for")
     voice: str = Field(..., description="The voice to use")
-    response_format: str = Field(default=AudioResponseFormat.wav)
+    response_format: str = Field(default=AudioResponseFormat.pcm)
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
 
 class TTSRequest(BaseModel):
@@ -192,6 +194,17 @@ async def text_to_speech(request: TTSRequest) -> StreamingResponse:
         print(f"Error generating speech: {str(e)}")
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
 
+def _pcm_byte_stream(text: str, voice: str, speed: float) -> Iterable[bytes]:
+    """Yield raw PCM bytes from the Kokoro pipeline."""
+    for i, (gs, ps, audio) in enumerate(
+        pipeline(text, voice=voice, speed=speed)
+    ):
+        print(f"Generated PCM chunk {i}: {gs}")
+        audio_np = audio.detach().cpu().numpy()
+        # Kokoro outputs float32 in [-1, 1]; convert to 16-bit little-endian PCM
+        pcm = (np.clip(audio_np, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        yield pcm
+
 @app.post("/v1/audio/speech")
 async def create_speech(request: AudioSpeechRequest):
     """OpenAI-compatible endpoint to generate speech from text."""
@@ -211,32 +224,44 @@ async def create_speech(request: AudioSpeechRequest):
         )
     
     try:
-        print(f"Generating speech for text: {request.input} with voice: {internal_voice}")
-        temp_file = Path("temp.wav")
-        
-        # Generate audio using pipeline's generator pattern
-        for i, (gs, ps, audio) in enumerate(pipeline(
+        print(
+            f"Generating speech for text: {request.input} with voice: {internal_voice} "
+            f"(format={request.response_format})"
+        )
+
+        if request.response_format == AudioResponseFormat.wav:
+            temp_file = Path("temp.wav")
+            for i, (gs, ps, audio) in enumerate(
+                pipeline(request.input, voice=internal_voice, speed=request.speed)
+            ):
+                print(f"Generated WAV chunk {i}: {gs}")
+                sf.write(temp_file, audio.detach().cpu().numpy(), 24000)
+
+            with open(temp_file, "rb") as f:
+                audio_data = f.read()
+            temp_file.unlink()
+
+            headers = {
+                "Content-Disposition": 'attachment; filename="speech.wav"'
+            }
+
+            return StreamingResponse(
+                io.BytesIO(audio_data),
+                media_type="audio/wav",
+                headers=headers,
+            )
+
+        # Default: raw PCM stream for LiveKit/CAAL
+        stream = _pcm_byte_stream(
             request.input,
             voice=internal_voice,
-            speed=request.speed
-        )):
-            print(f"Generated chunk {i}: {gs}")
-            sf.write(temp_file, audio.detach().cpu().numpy(), 24000)
-        
-        # Read and return audio
-        with open(temp_file, 'rb') as f:
-            audio_data = f.read()
-        temp_file.unlink()
-        
-        headers = {
-            "Content-Disposition": f'attachment; filename="speech.{request.response_format}"'
-        }
-        
-        return StreamingResponse(
-            io.BytesIO(audio_data),
-            media_type="audio/wav",
-            headers=headers
+            speed=request.speed,
         )
+        headers = {
+            "X-Audio-Sample-Rate": "24000",
+            "Content-Type": "audio/pcm",
+        }
+        return StreamingResponse(stream, media_type="audio/pcm", headers=headers)
     
     except Exception as e:
         print(f"Error generating speech: {str(e)}")
